@@ -6,6 +6,10 @@ This is an experimental plugin for [Adrenaline](https://github.com/TheOfficialFl
 
 Please help testing games and filling out the [spreadsheet](https://docs.google.com/spreadsheets/d/1aZlmKwELcdpCb9ezI5iRfgcX9hoGxgL4tNC-673aKqk/edit#gid=0).
 
+## Changelog v0.11
+
+- Fixed issue where black rectangles would cover the screen in lots of games.
+
 ## Installation
 
 - Before you start, make sure you have Adrenaline 6.9 or higher and disable all other plugins in `ux0:pspemu/seplugins/game.txt` (remove all lines or set to 0).
@@ -26,3 +30,11 @@ Some games may:
 
 - Not display cutscenes.
 - Have wrong color format / line width.
+
+## Donation
+
+If you like my work and want to support future projects, you can make a donation:
+
+- via bitcoin `361jRJtjppd2iyaAhBGjf9GUCWnunxtZ49`
+- via [paypal](https://www.paypal.me/flowsupport/20)
+- via [patreon](https://www.patreon.com/TheOfficialFloW)
