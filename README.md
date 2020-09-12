@@ -8,6 +8,8 @@ Please help testing games and filling out the [spreadsheet](https://docs.google.
 
 ## Installation
 
+- Before you start, make sure you have Adrenaline 6.9 or higher and disable all other plugins in `ux0:pspemu/seplugins/game.txt` (remove all lines or set to 0).
+
 - Download [ge_patch.prx](https://github.com/TheOfficialFloW/GePatch/releases/download/v0.1/ge_patch.prx).
 
 - Copy it to `ux0:pspemu/seplugins/`.
