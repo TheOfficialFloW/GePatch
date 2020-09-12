@@ -29,6 +29,8 @@ PSP_MODULE_INFO("GePatch", 0x1007, 1, 0);
 #define VRAM_DRAW_BUFFER_OFFSET 0
 #define VRAM_DEPTH_BUFFER_OFFSET 0x00100000
 
+#define VRAM_1KB 0x001ff000
+
 #define log(...) \
 { \
   char msg[256]; \
@@ -238,6 +240,7 @@ void patchGeList(u32 *list, u32 *stall) {
               switch (pos_size) {
                 case 1:
                   *(u8 *)addr *= 2;
+                  break;
                 case 2:
                   // This works for Marvel Ultimate Alliance
                   // if (*(u16 *)addr == 480)
@@ -271,7 +274,19 @@ void patchGeList(u32 *list, u32 *stall) {
         *list = (cmd << 24) | (VRAM_DRAW_BUFFER_OFFSET & 0xffffff);
         break;
       case GE_CMD_FRAMEBUFWIDTH:
-        *list = (cmd << 24) | ((VRAM_DRAW_BUFFER_OFFSET >> 24) << 16) | PITCH;
+        if ((data & 0xffff) == 512) {
+          *list = (cmd << 24) | ((VRAM_DRAW_BUFFER_OFFSET >> 24) << 16) | PITCH;
+        } else {
+          // Dummy draw
+          if ((*(list+1) >> 24) == GE_CMD_FRAMEBUFPTR) {
+            *list = (cmd << 24) | ((VRAM_1KB >> 24) << 16) | 0;
+            *(list+1) = (GE_CMD_FRAMEBUFPTR << 24) | (VRAM_1KB & 0xffffff);
+            list++;
+          } else if ((*(list-1) >> 24) == GE_CMD_FRAMEBUFPTR) {
+            *(list-1) = (GE_CMD_FRAMEBUFPTR << 24) | (VRAM_1KB & 0xffffff);
+            *list = (cmd << 24) | ((VRAM_1KB >> 24) << 16) | 0;
+          }
+        }
         break;
       case GE_CMD_ZBUFPTR:
         *list = (cmd << 24) | (VRAM_DEPTH_BUFFER_OFFSET & 0xffffff);
