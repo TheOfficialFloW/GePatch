@@ -333,7 +333,7 @@ int sceGeListUpdateStallAddrPatched(int qid, void *stall) {
   char info[64];
   if (_sceGeGetList(qid, info, NULL) == 0) {
     void *list = *(void **)(info + 0x18); // stall
-    // if (!list)
+    if (!list)
       list = *(void **)(info + 0x14); // list
     iterateGeList((u32)list & 0x0fffffff, (u32)stall & 0x0fffffff);
   }
