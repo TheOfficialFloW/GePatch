@@ -6,6 +6,11 @@ This is an experimental plugin for [Adrenaline](https://github.com/TheOfficialFl
 
 Please help testing games and filling out the [spreadsheet](https://docs.google.com/spreadsheets/d/1aZlmKwELcdpCb9ezI5iRfgcX9hoGxgL4tNC-673aKqk/edit#gid=0).
 
+## Changelog v0.13
+
+- Fixed issue where some games would render a black screen only.
+- Fixed issue where some games would crash because.
+
 ## Changelog v0.12
 
 - Fixed issue where some games would be inverted or upsidedown.
@@ -33,7 +38,8 @@ Please help testing games and filling out the [spreadsheet](https://docs.google.
 Some games may:
 
 - Not display cutscenes.
-- Have wrong color format / line width.
+- Have a black screen.
+- Not display all textures.
 
 ## Donation
 

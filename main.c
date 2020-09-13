@@ -227,7 +227,8 @@ void patchGeList(u32 *list, u32 *stall) {
         getVertexSizeAndPositionOffset(vertex_type, &vertex_size, &pos_off);
 
         int through = (vertex_type & GE_VTYPE_THROUGH_MASK) == GE_VTYPE_THROUGH;
-        if (through) {
+        int no_idx = (vertex_type & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_NONE;
+        if (through && no_idx) {
           int pos = (vertex_type & GE_VTYPE_POS_MASK) >> GE_VTYPE_POS_SHIFT;
           int pos_size = possize[pos] / 3;
 
@@ -239,20 +240,20 @@ void patchGeList(u32 *list, u32 *stall) {
               u32 addr = vertex_addr + i * vertex_size + pos_off + j * pos_size;
               switch (pos_size) {
                 case 1:
-                  *(u8 *)addr *= 2;
+                  *(char *)addr *= 2;
                   break;
                 case 2:
-                  // This works for Marvel Ultimate Alliance
-                  // if (*(u16 *)addr == 480)
-                    // *(u16 *)addr = 960;
-                  // else if (*(u16 *)addr == 272)
-                    // *(u16 *)addr = 544;
-                  *(u16 *)addr *= 2;
+                  // TODO: figure out if that range makes sense.
+                  if (*(short *)addr > -2048 && *(short *)addr < 2048)
+                    *(short *)addr *= 2;
                   break;
                 case 4:
+                  // TODO: figure out if that range makes sense.
                   t.i = *(u32 *)addr;
-                  t.f *= 2;
-                  *(u32 *)addr = t.i;
+                  if (t.f > -2048 && t.f < 2048) {
+                    t.f *= 2;
+                    *(u32 *)addr = t.i;
+                  }
                   break;
               }
             }
@@ -343,15 +344,19 @@ void iterateGeList(u32 list, u32 stall) {
   sceKernelDcacheWritebackInvalidateAll();
 }
 
+void *(* _sceGeEdramGetAddr)(void);
 int (* _sceGeGetList)(int qid, void *list, int *flag);
-int (* _sceGeListSync)(int qid, int syncType);
 int (* _sceGeListUpdateStallAddr)(int qid, void *stall);
 int (* _sceGeListEnQueue)(const void *list, void *stall, int cbid, PspGeListArgs *arg);
 int (* _sceGeListEnQueueHead)(const void *list, void *stall, int cbid, PspGeListArgs *arg);
+int (* _sceGeListSync)(int qid, int syncType);
 int (* _sceGeDrawSync)(int syncType);
-void *(* _sceGeEdramGetAddr)(void);
 
 int (* _sceDisplaySetFrameBuf)(void *topaddr, int bufferwidth, int pixelformat, int sync);
+
+void *sceGeEdramGetAddrPatched(void) {
+  return (void *)FAKE_VRAM;
+}
 
 int sceGeListUpdateStallAddrPatched(int qid, void *stall) {
   int k1 = pspSdkSetK1(0);
@@ -380,12 +385,12 @@ int sceGeListEnQueueHeadPatched(const void *list, void *stall, int cbid, PspGeLi
   return _sceGeListEnQueueHead(list, stall, cbid, arg);
 }
 
-int sceGeDrawSyncPatched(int syncType) {
-  return _sceGeDrawSync(syncType);
+int sceGeListSyncPatched(int qid, int syncType) {
+  return _sceGeListSync(qid, syncType);
 }
 
-void *sceGeEdramGetAddrPatched(void) {
-  return (void *)FAKE_VRAM;
+int sceGeDrawSyncPatched(int syncType) {
+  return _sceGeDrawSync(syncType);
 }
 
 int sceDisplaySetFrameBufPatched(void *topaddr, int bufferwidth, int pixelformat, int sync) {
@@ -405,21 +410,22 @@ int sceDisplaySetFrameBufPatched(void *topaddr, int bufferwidth, int pixelformat
 }
 
 int module_start(SceSize args, void *argp) {
-  _sceGeGetList = (void *)sctrlHENFindFunction("sceGE_Manager", "sceGe_driver", 0x67B01D8E);
-  _sceGeListSync = (void *)sctrlHENFindFunction("sceGE_Manager", "sceGe_driver", 0x03444EB4);
-  _sceGeListUpdateStallAddr = (void *)sctrlHENFindFunction("sceGE_Manager", "sceGe_driver", 0xE0D68148);
-  _sceGeListEnQueue = (void *)sctrlHENFindFunction("sceGE_Manager", "sceGe_driver", 0xAB49E76A);
-  _sceGeListEnQueueHead = (void *)sctrlHENFindFunction("sceGE_Manager", "sceGe_driver", 0x1C0D95A6);
-  _sceGeDrawSync = (void *)sctrlHENFindFunction("sceGE_Manager", "sceGe_driver", 0xB287BD61);
-  _sceGeEdramGetAddr = (void *)sctrlHENFindFunction("sceGE_Manager", "sceGe_driver", 0xE47E40E4);
+  _sceGeEdramGetAddr = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0xE47E40E4);
+  _sceGeGetList = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0x67B01D8E);
+  _sceGeListUpdateStallAddr = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0xE0D68148);
+  _sceGeListEnQueue = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0xAB49E76A);
+  _sceGeListEnQueueHead = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0x1C0D95A6);
+  _sceGeListSync = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0x03444EB4);
+  _sceGeDrawSync = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0xB287BD61);
 
+  sctrlHENPatchSyscall((u32)_sceGeEdramGetAddr, sceGeEdramGetAddrPatched);
   sctrlHENPatchSyscall((u32)_sceGeListUpdateStallAddr, sceGeListUpdateStallAddrPatched);
   sctrlHENPatchSyscall((u32)_sceGeListEnQueue, sceGeListEnQueuePatched);
   sctrlHENPatchSyscall((u32)_sceGeListEnQueueHead, sceGeListEnQueueHeadPatched);
+  // sctrlHENPatchSyscall((u32)_sceGeListSync, sceGeListSyncPatched);
   // sctrlHENPatchSyscall((u32)_sceGeDrawSync, sceGeDrawSyncPatched);
-  sctrlHENPatchSyscall((u32)_sceGeEdramGetAddr, sceGeEdramGetAddrPatched);
 
-  _sceDisplaySetFrameBuf = (void *)sctrlHENFindFunction("sceDisplay_Service", "sceDisplay_driver", 0x289D82FE);
+  _sceDisplaySetFrameBuf = (void *)FindProc("sceDisplay_Service", "sceDisplay_driver", 0x289D82FE);
   sctrlHENPatchSyscall((u32)_sceDisplaySetFrameBuf, sceDisplaySetFrameBufPatched);
 
   sceKernelDcacheWritebackInvalidateAll();
