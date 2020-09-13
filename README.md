@@ -6,6 +6,10 @@ This is an experimental plugin for [Adrenaline](https://github.com/TheOfficialFl
 
 Please help testing games and filling out the [spreadsheet](https://docs.google.com/spreadsheets/d/1aZlmKwELcdpCb9ezI5iRfgcX9hoGxgL4tNC-673aKqk/edit#gid=0).
 
+## Changelog v0.14
+
+- Fixed another issue that causes games to show black screen only.
+
 ## Changelog v0.13
 
 - Fixed issue where some games would render a black screen only.

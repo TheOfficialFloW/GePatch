@@ -51,6 +51,9 @@ void logmsg(char *msg) {
   pspSdkSetK1(k1);
 }
 
+static int rendered_in_sync = 0;
+static int framebuf_set = 0;
+
 static u32 stack[0x10000];
 static u32 curr_stack = 0;
 
@@ -389,11 +392,7 @@ int sceGeListSyncPatched(int qid, int syncType) {
   return _sceGeListSync(qid, syncType);
 }
 
-int sceGeDrawSyncPatched(int syncType) {
-  return _sceGeDrawSync(syncType);
-}
-
-int sceDisplaySetFrameBufPatched(void *topaddr, int bufferwidth, int pixelformat, int sync) {
+void copyFrameBuffer() {
   *(u32 *)DRAW_NATIVE = 1;
 
   sceGuStart(0, (void *)(RENDER_LIST | 0xA0000000));
@@ -405,7 +404,27 @@ int sceDisplaySetFrameBufPatched(void *topaddr, int bufferwidth, int pixelformat
   sceGuTexSync();
   sceGuFinish();
   _sceGeListEnQueue((void *)((u32)RENDER_LIST | 0x40000000), NULL, 0, NULL);
+}
 
+int sceGeDrawSyncPatched(int syncType) {
+  if (!framebuf_set) {
+    // Framebuffer was not set previously (maybe it does never change)
+    if (syncType == PSP_GE_LIST_DONE || syncType == PSP_GE_LIST_DRAWING_DONE) {
+      copyFrameBuffer();
+      rendered_in_sync = 1;
+    }
+  }
+
+  framebuf_set = 0;
+
+  return _sceGeDrawSync(syncType);
+}
+
+int sceDisplaySetFrameBufPatched(void *topaddr, int bufferwidth, int pixelformat, int sync) {
+  if (!rendered_in_sync)
+    copyFrameBuffer();
+  rendered_in_sync = 0;
+  framebuf_set = 1;
   return _sceDisplaySetFrameBuf(topaddr, bufferwidth, pixelformat, sync);
 }
 
@@ -423,7 +442,7 @@ int module_start(SceSize args, void *argp) {
   sctrlHENPatchSyscall((u32)_sceGeListEnQueue, sceGeListEnQueuePatched);
   sctrlHENPatchSyscall((u32)_sceGeListEnQueueHead, sceGeListEnQueueHeadPatched);
   // sctrlHENPatchSyscall((u32)_sceGeListSync, sceGeListSyncPatched);
-  // sctrlHENPatchSyscall((u32)_sceGeDrawSync, sceGeDrawSyncPatched);
+  sctrlHENPatchSyscall((u32)_sceGeDrawSync, sceGeDrawSyncPatched);
 
   _sceDisplaySetFrameBuf = (void *)FindProc("sceDisplay_Service", "sceDisplay_driver", 0x289D82FE);
   sctrlHENPatchSyscall((u32)_sceDisplaySetFrameBuf, sceDisplaySetFrameBufPatched);
