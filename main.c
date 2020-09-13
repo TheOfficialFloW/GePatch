@@ -296,11 +296,21 @@ void patchGeList(u32 *list, u32 *stall) {
         break;
 
       case GE_CMD_VIEWPORTXSCALE:
-        t.f = WIDTH / 2;
+        t.i = data << 8;
+        t.f = (t.f < 0) ? -(WIDTH / 2) : (WIDTH / 2);
         *list = (cmd << 24) | (t.i >> 8);
         break;
       case GE_CMD_VIEWPORTYSCALE:
-        t.f = -(HEIGHT / 2);
+        t.i = data << 8;
+        t.f = (t.f < 0) ? -(HEIGHT / 2) : (HEIGHT / 2);
+        *list = (cmd << 24) | (t.i >> 8);
+        break;
+      case GE_CMD_VIEWPORTXCENTER:
+        t.f = 2048;
+        *list = (cmd << 24) | (t.i >> 8);
+        break;
+      case GE_CMD_VIEWPORTYCENTER:
+        t.f = 2048;
         *list = (cmd << 24) | (t.i >> 8);
         break;
       case GE_CMD_OFFSETX:

@@ -6,6 +6,10 @@ This is an experimental plugin for [Adrenaline](https://github.com/TheOfficialFl
 
 Please help testing games and filling out the [spreadsheet](https://docs.google.com/spreadsheets/d/1aZlmKwELcdpCb9ezI5iRfgcX9hoGxgL4tNC-673aKqk/edit#gid=0).
 
+## Changelog v0.12
+
+- Fixed issue where some games would be inverted or upsidedown.
+
 ## Changelog v0.11
 
 - Fixed issue where black rectangles would cover the screen in lots of games.
@@ -14,7 +18,7 @@ Please help testing games and filling out the [spreadsheet](https://docs.google.
 
 - Before you start, make sure you have Adrenaline 6.9 or higher and disable all other plugins in `ux0:pspemu/seplugins/game.txt` (remove all lines or set to 0).
 
-- Download [ge_patch.prx](https://github.com/TheOfficialFloW/GePatch/releases/download/v0.11/ge_patch.prx).
+- Download [ge_patch.prx](https://github.com/TheOfficialFloW/GePatch/releases).
 
 - Copy it to `ux0:pspemu/seplugins/`.
 
