@@ -9,7 +9,7 @@ Please help testing games and filling out the [spreadsheet](https://docs.google.
 ## Changelog v0.13
 
 - Fixed issue where some games would render a black screen only.
-- Fixed issue where some games would crash because.
+- Fixed issue where some games would crash because vertices were updated multiple times.
 
 ## Changelog v0.12
 
