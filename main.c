@@ -28,7 +28,6 @@ PSP_MODULE_INFO("GePatch", 0x1007, 1, 0);
 
 #define VRAM_DRAW_BUFFER_OFFSET 0
 #define VRAM_DEPTH_BUFFER_OFFSET 0x00100000
-
 #define VRAM_1KB 0x001ff000
 
 #define log(...) \
@@ -49,23 +48,6 @@ void logmsg(char *msg) {
   }
 
   pspSdkSetK1(k1);
-}
-
-static int rendered_in_sync = 0;
-static int framebuf_set = 0;
-
-static u32 stack[0x10000];
-static u32 curr_stack = 0;
-
-static void push(u32 data) {
-  if (curr_stack < (sizeof(stack) / sizeof(u32)))
-    stack[curr_stack++] = data;
-}
-
-static u32 pop() {
-  if (curr_stack > 0)
-    return stack[--curr_stack];
-  return 0;
 }
 
 static const u8 tcsize[4] = { 0, 2, 4, 8 }, tcalign[4] = { 0, 1, 2, 4 };
@@ -136,23 +118,115 @@ void getVertexSizeAndPositionOffset(u32 op, u8 *vertex_size, u8 *pos_off) {
   *pos_off = posoff;
 }
 
+void GetIndexBounds(const void *inds, int count, u32 vertType, u16 *indexLowerBound, u16 *indexUpperBound) {
+  int i;
+  int lowerBound = 0x7FFFFFFF;
+  int upperBound = 0;
+  u32 idx = vertType & GE_VTYPE_IDX_MASK;
+  if (idx == GE_VTYPE_IDX_8BIT) {
+    const u8 *ind8 = (const u8 *)inds;
+    for (i = 0; i < count; i++) {
+      u8 value = ind8[i];
+      if (value > upperBound)
+        upperBound = value;
+      if (value < lowerBound)
+        lowerBound = value;
+    }
+  } else if (idx == GE_VTYPE_IDX_16BIT) {
+    const u16 *ind16 = (const u16 *)inds;
+    for (i = 0; i < count; i++) {
+      u16 value = ind16[i];
+      if (value > upperBound)
+        upperBound = value;
+      if (value < lowerBound)
+        lowerBound = value;
+    }
+  } else if (idx == GE_VTYPE_IDX_32BIT) {
+    const u32 *ind32 = (const u32 *)inds;
+    for (i = 0; i < count; i++) {
+      u16 value = (u16)ind32[i];
+      if (value > upperBound)
+        upperBound = value;
+      if (value < lowerBound)
+        lowerBound = value;
+    }
+  } else {
+    lowerBound = 0;
+    upperBound = count - 1;
+  }
+  *indexLowerBound = (u16)lowerBound;
+  *indexUpperBound = (u16)upperBound;
+}
+
+void AdvanceVerts(u32 *index_addr, u32 *vertex_addr, u32 vertex_type, int count, int vertex_size) {
+  if ((vertex_type & GE_VTYPE_IDX_MASK) != GE_VTYPE_IDX_NONE) {
+    int index_shift = ((vertex_type & GE_VTYPE_IDX_MASK) >> GE_VTYPE_IDX_SHIFT) - 1;
+    (*index_addr) += count << index_shift;
+  } else {
+    (*vertex_addr) += count * vertex_size;
+  }
+}
+
+typedef struct {
+  u32 list;
+  u32 offset;
+} StackEntry;
+
+static int rendered_in_sync = 0;
+static int framebuf_set = 0;
+
+static u32 base = 0;
+static u32 offset = 0;
+static u32 address = 0;
+static u32 index_addr = 0;
+static u32 vertex_addr = 0;
+static u32 vertex_type = 0;
+
+static StackEntry stack[64];
+static u32 curr_stack = 0;
+
+static u32 finished = 0;
+
+static int push(StackEntry data) {
+  if (curr_stack < (sizeof(stack) / sizeof(StackEntry))) {
+    stack[curr_stack++] = data;
+    return 0;
+  }
+  return -1;
+}
+
+static StackEntry pop() {
+  if (curr_stack > 0)
+    return stack[--curr_stack];
+  StackEntry stack_entry;
+  stack_entry.list = -1;
+  stack_entry.offset = -1;
+  return stack_entry;
+}
+
+void resetGeGlobals() {
+  base = 0;
+  offset = 0;
+  address = 0;
+  index_addr = 0;
+  vertex_addr = 0;
+  vertex_type = 0;
+  curr_stack = 0;
+  finished = 0;
+}
+
 void patchGeList(u32 *list, u32 *stall) {
   union {
     float f;
     unsigned int i;
   } t;
 
-  u32 base = 0;
-  u32 offset = 0;
-  u32 address = 0;
-  u32 vertex_addr = 0;
-  u32 vertex_type = 0;
+  StackEntry stack_entry;
 
   while (!stall || (stall && list != stall)) {
     u32 op = *list;
     u32 cmd = op >> 24;
     u32 data = op & 0xffffff;
-
     switch (cmd) {
       case GE_CMD_BASE:
         base = (data << 8) & 0x0f000000;
@@ -164,24 +238,62 @@ void patchGeList(u32 *list, u32 *stall) {
         offset = (u32)list;
         break;
 
+      // TODO: need to save other states, too?
       case GE_CMD_CALL:
         address = ((base | data) + offset) & 0x0ffffffc;
-        push(address);
+        stack_entry.list = (u32)list;
+        stack_entry.offset = offset;
+        if (push(stack_entry) == 0)
+          list = (u32 *)(address - 4);
         break;
 
+      // TODO: is it okay to always take the branch?
       case GE_CMD_BJUMP:
         address = ((base | data) + offset) & 0x0ffffffc;
-        push(address);
-        return; // MAYBE break? returns seems to work with MUA
+        list = (u32 *)(address - 4);
+        break;
 
       case GE_CMD_JUMP:
         address = ((base | data) + offset) & 0x0ffffffc;
-        push(address);
-        return;
+        list = (u32 *)(address - 4);
+        break;
 
       case GE_CMD_RET:
+      {
+        // Ignore returns when the stack is empty
+        stack_entry = pop();
+        if (stack_entry.list != -1) {
+          list = (u32 *)stack_entry.list;
+          offset = stack_entry.offset;
+        }
+        break;
+      }
+
       case GE_CMD_END:
-        return;
+      {
+        u32 prev = *(list-1);
+        switch (prev >> 24) {
+          // TODO: understand how signals are handled
+          case GE_CMD_SIGNAL:
+          {
+            // u8 behaviour = (prev >> 16) & 0xff;
+            // u16 signal = prev & 0xffff;
+            // u16 enddata = data & 0xffff;
+            break;
+          }
+          case GE_CMD_FINISH:
+            resetGeGlobals();
+            finished = 1;
+            return;
+          default:
+            break;
+        }
+        break;
+      }
+
+      case GE_CMD_IADDR:
+        index_addr = ((base | data) + offset) & 0x0fffffff;
+        break;
 
       case GE_CMD_VADDR:
         vertex_addr = ((base | data) + offset) & 0x0fffffff;
@@ -197,12 +309,12 @@ void patchGeList(u32 *list, u32 *stall) {
         u8 num_points_u = data & 0xff;
         u8 num_points_v = (data >> 8) & 0xff;
 
+        u32 count = num_points_u * num_points_v;
+
         u8 vertex_size = 0, pos_off = 0;
         getVertexSizeAndPositionOffset(vertex_type, &vertex_size, &pos_off);
 
-        if ((vertex_type & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_NONE) {
-          vertex_addr += (num_points_u * num_points_v) * vertex_size;
-        }
+        AdvanceVerts(&index_addr, &vertex_addr, vertex_type, count, vertex_size);
 
         break;
       }
@@ -214,9 +326,7 @@ void patchGeList(u32 *list, u32 *stall) {
         u8 vertex_size = 0, pos_off = 0;
         getVertexSizeAndPositionOffset(vertex_type, &vertex_size, &pos_off);
 
-        if ((vertex_type & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_NONE) {
-          vertex_addr += count * vertex_size;
-        }
+        AdvanceVerts(&index_addr, &vertex_addr, vertex_type, count, vertex_size);
 
         break;
       }
@@ -230,21 +340,25 @@ void patchGeList(u32 *list, u32 *stall) {
         getVertexSizeAndPositionOffset(vertex_type, &vertex_size, &pos_off);
 
         int through = (vertex_type & GE_VTYPE_THROUGH_MASK) == GE_VTYPE_THROUGH;
-        int no_idx = (vertex_type & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_NONE;
-        if (through && no_idx) {
+        if (through) {
           int pos = (vertex_type & GE_VTYPE_POS_MASK) >> GE_VTYPE_POS_SHIFT;
           int pos_size = possize[pos] / 3;
 
           // TODO: we may patch the same vertex again and again...
+          u16 lower = 0;
+          u16 upper = count;
+          if ((vertex_type & GE_VTYPE_IDX_MASK) != GE_VTYPE_IDX_NONE) {
+            lower = 0;
+            upper = 0;
+            GetIndexBounds((void *)index_addr, count, vertex_type, &lower, &upper);
+          }
+
           int i;
           for (i = 0; i < count; i++) {
             int j;
             for (j = 0; j < 2; j++) {
               u32 addr = vertex_addr + i * vertex_size + pos_off + j * pos_size;
               switch (pos_size) {
-                case 1:
-                  *(char *)addr *= 2;
-                  break;
                 case 2:
                   // TODO: figure out if that range makes sense.
                   if (*(short *)addr > -2048 && *(short *)addr < 2048)
@@ -263,9 +377,7 @@ void patchGeList(u32 *list, u32 *stall) {
           }
         }
 
-        if ((vertex_type & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_NONE) {
-          vertex_addr += count * vertex_size;
-        }
+        AdvanceVerts(&index_addr, &vertex_addr, vertex_type, count, vertex_size);
 
         break;
       }
@@ -337,16 +449,6 @@ void patchGeList(u32 *list, u32 *stall) {
   }
 }
 
-void iterateGeList(u32 list, u32 stall) {
-  push(list);
-
-  do {
-    patchGeList((u32 *)pop(), (u32 *)stall);
-  } while (curr_stack > 0);
-
-  sceKernelDcacheWritebackInvalidateAll();
-}
-
 void *(* _sceGeEdramGetAddr)(void);
 int (* _sceGeGetList)(int qid, void *list, int *flag);
 int (* _sceGeListUpdateStallAddr)(int qid, void *stall);
@@ -365,10 +467,14 @@ int sceGeListUpdateStallAddrPatched(int qid, void *stall) {
   int k1 = pspSdkSetK1(0);
   char info[64];
   if (_sceGeGetList(qid, info, NULL) == 0) {
-    void *list = *(void **)(info + 0x18); // stall
-    if (!list)
-      list = *(void **)(info + 0x14); // list
-    iterateGeList((u32)list & 0x0fffffff, (u32)stall & 0x0fffffff);
+    u16 state = *(u16 *)(info + 0x08);
+    if (state != 3 && !finished) { // completed
+      void *list = *(void **)(info + 0x18); // previous stall
+      if (!list)
+        list = *(void **)(info + 0x14); // list
+      patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
+      sceKernelDcacheWritebackInvalidateAll();
+    }
   }
   pspSdkSetK1(k1);
   return _sceGeListUpdateStallAddr(qid, stall);
@@ -376,14 +482,18 @@ int sceGeListUpdateStallAddrPatched(int qid, void *stall) {
 
 int sceGeListEnQueuePatched(const void *list, void *stall, int cbid, PspGeListArgs *arg) {
   int k1 = pspSdkSetK1(0);
-  iterateGeList((u32)list & 0x0fffffff, (u32)stall & 0x0fffffff);
+  resetGeGlobals();
+  patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
+  sceKernelDcacheWritebackInvalidateAll();
   pspSdkSetK1(k1);
   return _sceGeListEnQueue(list, stall, cbid, arg);
 }
 
 int sceGeListEnQueueHeadPatched(const void *list, void *stall, int cbid, PspGeListArgs *arg) {
   int k1 = pspSdkSetK1(0);
-  iterateGeList((u32)list & 0x0fffffff, (u32)stall & 0x0fffffff);
+  resetGeGlobals();
+  patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
+  sceKernelDcacheWritebackInvalidateAll();
   pspSdkSetK1(k1);
   return _sceGeListEnQueueHead(list, stall, cbid, arg);
 }
