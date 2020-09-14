@@ -227,6 +227,7 @@ void patchGeList(u32 *list, u32 *stall) {
     u32 op = *list;
     u32 cmd = op >> 24;
     u32 data = op & 0xffffff;
+
     switch (cmd) {
       case GE_CMD_BASE:
         base = (data << 8) & 0x0f000000;
@@ -273,18 +274,47 @@ void patchGeList(u32 *list, u32 *stall) {
       {
         u32 prev = *(list-1);
         switch (prev >> 24) {
-          // TODO: understand how signals are handled
           case GE_CMD_SIGNAL:
           {
-            // u8 behaviour = (prev >> 16) & 0xff;
-            // u16 signal = prev & 0xffff;
-            // u16 enddata = data & 0xffff;
+            u8 behaviour = (prev >> 16) & 0xff;
+            u16 signal = prev & 0xffff;
+            u16 enddata = data & 0xffff;
+            u32 target;
+
+            switch (behaviour) {
+              case PSP_GE_SIGNAL_JUMP:
+                target = (((signal << 16) | enddata) & 0x0ffffffc);
+                list = (u32 *)(target - 4);
+                break;
+
+              case PSP_GE_SIGNAL_CALL:
+                target = (((signal << 16) | enddata) & 0x0ffffffc);
+                stack_entry.list = (u32)list;
+                stack_entry.offset = offset;
+                if (push(stack_entry) == 0)
+                  list = (u32 *)(target - 4);
+                break;
+
+              case PSP_GE_SIGNAL_RET:
+                // Ignore returns when the stack is empty
+                stack_entry = pop();
+                if (stack_entry.list != -1) {
+                  list = (u32 *)stack_entry.list;
+                  offset = stack_entry.offset;
+                }
+                break;
+
+              default:
+                break;
+            }
             break;
           }
+
           case GE_CMD_FINISH:
             resetGeGlobals();
             finished = 1;
             return;
+
           default:
             break;
         }
@@ -354,7 +384,7 @@ void patchGeList(u32 *list, u32 *stall) {
           }
 
           int i;
-          for (i = 0; i < count; i++) {
+          for (i = lower; i < upper; i++) {
             int j;
             for (j = 0; j < 2; j++) {
               u32 addr = vertex_addr + i * vertex_size + pos_off + j * pos_size;
