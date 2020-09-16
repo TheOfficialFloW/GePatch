@@ -121,7 +121,7 @@ void sceGuDisable(int state)
 
 int sceGuFinish(void)
 {
-  sendCommandi(15,2);
+  sendCommandi(15,0);
   sendCommandi(12,0);
   return 0;
 }

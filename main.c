@@ -17,18 +17,16 @@ PSP_MODULE_INFO("GePatch", 0x1007, 1, 0);
 #define PITCH 960
 #define WIDTH 960
 #define HEIGHT 544
-#define PIXELFORMAT 0
+#define PIXELFORMAT GE_FORMAT_565
 
 #define DISPLAY_BUFFER 0x0A000000
 #define FAKE_VRAM 0x0A200000
 #define VERTICES_BUFFER 0x0A400000
 #define RENDER_LIST 0x0A800000
 
-#define VRAM 0x04000000
-
-#define VRAM_DRAW_BUFFER_OFFSET 0
-#define VRAM_DEPTH_BUFFER_OFFSET 0x00100000
-#define VRAM_1KB 0x001ff000
+#define VRAM_DRAW_BUFFER_OFFSET 0x04000000
+#define VRAM_DEPTH_BUFFER_OFFSET 0x04100000
+#define VRAM_1KB 0x041ff000
 
 #define log(...) \
 { \
@@ -181,11 +179,10 @@ static u32 address = 0;
 static u32 index_addr = 0;
 static u32 vertex_addr = 0;
 static u32 vertex_type = 0;
-
-static StackEntry stack[64];
-static u32 curr_stack = 0;
-
+static u32 sync = 0;
 static u32 finished = 0;
+static u32 curr_stack = 0;
+static StackEntry stack[64];
 
 static int push(StackEntry data) {
   if (curr_stack < (sizeof(stack) / sizeof(StackEntry))) {
@@ -211,8 +208,9 @@ void resetGeGlobals() {
   index_addr = 0;
   vertex_addr = 0;
   vertex_type = 0;
-  curr_stack = 0;
+  sync = 0;
   finished = 0;
+  curr_stack = 0;
 }
 
 void patchGeList(u32 *list, u32 *stall) {
@@ -281,7 +279,13 @@ void patchGeList(u32 *list, u32 *stall) {
             u16 enddata = data & 0xffff;
             u32 target;
 
+            sync = 0;
+
             switch (behaviour) {
+              case PSP_GE_SIGNAL_SYNC:
+                sync = 1;
+                break;
+
               case PSP_GE_SIGNAL_JUMP:
                 target = (((signal << 16) | enddata) & 0x0ffffffc);
                 list = (u32 *)(target - 4);
@@ -311,7 +315,12 @@ void patchGeList(u32 *list, u32 *stall) {
           }
 
           case GE_CMD_FINISH:
-            resetGeGlobals();
+            // After syncing, finish is ignored?
+            if (sync) {
+              sync = 0;
+              break;
+            }
+            // resetGeGlobals();
             finished = 1;
             return;
 
@@ -413,7 +422,7 @@ void patchGeList(u32 *list, u32 *stall) {
       }
 
       case GE_CMD_FRAMEBUFPIXFORMAT:
-        *list = (cmd << 24) | GE_FORMAT_565;
+        *list = (cmd << 24) | PIXELFORMAT;
         break;
 
       case GE_CMD_FRAMEBUFPTR:
@@ -498,13 +507,14 @@ int sceGeListUpdateStallAddrPatched(int qid, void *stall) {
   char info[64];
   if (_sceGeGetList(qid, info, NULL) == 0) {
     u16 state = *(u16 *)(info + 0x08);
-    if (state != 3 && !finished) { // completed
+    // Some games fail with this condition
+    // if (state != 3 && !finished) { // completed
       void *list = *(void **)(info + 0x18); // previous stall
       if (!list)
         list = *(void **)(info + 0x14); // list
       patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
       sceKernelDcacheWritebackInvalidateAll();
-    }
+    // }
   }
   pspSdkSetK1(k1);
   return _sceGeListUpdateStallAddr(qid, stall);
@@ -536,14 +546,11 @@ void copyFrameBuffer() {
   *(u32 *)DRAW_NATIVE = 1;
 
   sceGuStart(0, (void *)(RENDER_LIST | 0xA0000000));
-  sceGuTexSync();
-  sceGuTexImage(0, 0, 0, 0, (void *)(VRAM + VRAM_DRAW_BUFFER_OFFSET));
   sceGuCopyImage(PIXELFORMAT, 0, 0, WIDTH, HEIGHT, PITCH,
-                 (void *)(0x40000000 | (VRAM + VRAM_DRAW_BUFFER_OFFSET)),
-                 0, 0, PITCH, (void *)(0x40000000 | DISPLAY_BUFFER));
-  sceGuTexSync();
+                 (void *)VRAM_DRAW_BUFFER_OFFSET,
+                 0, 0, PITCH, (void *)DISPLAY_BUFFER);
   sceGuFinish();
-  _sceGeListEnQueue((void *)((u32)RENDER_LIST | 0x40000000), NULL, 0, NULL);
+  _sceGeListEnQueue((void *)RENDER_LIST, NULL, 0, NULL);
 }
 
 int sceGeDrawSyncPatched(int syncType) {
@@ -555,7 +562,8 @@ int sceGeDrawSyncPatched(int syncType) {
     }
   }
 
-  framebuf_set = 0;
+  if (framebuf_set > 0)
+    framebuf_set--;
 
   return _sceGeDrawSync(syncType);
 }
@@ -564,7 +572,8 @@ int sceDisplaySetFrameBufPatched(void *topaddr, int bufferwidth, int pixelformat
   if (!rendered_in_sync)
     copyFrameBuffer();
   rendered_in_sync = 0;
-  framebuf_set = 1;
+  if (framebuf_set < 2)
+    framebuf_set++;
   return _sceDisplaySetFrameBuf(topaddr, bufferwidth, pixelformat, sync);
 }
 
