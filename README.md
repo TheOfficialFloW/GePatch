@@ -6,6 +6,10 @@ This is an experimental plugin for [Adrenaline](https://github.com/TheOfficialFl
 
 Please help testing games and filling out the [spreadsheet](https://docs.google.com/spreadsheets/d/1aZlmKwELcdpCb9ezI5iRfgcX9hoGxgL4tNC-673aKqk/edit#gid=0).
 
+## Changelog v0.17.1
+
+- Fixed indexed draws which caused some games to render at 480x272 only.
+
 ## Changelog v0.17
 
 - Fixed artifacts, flickering and black screens in some games.

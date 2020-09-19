@@ -459,46 +459,42 @@ void patchGeList(u32 *list, u32 *stall) {
           u16 lower = 0;
           u16 upper = count;
           if ((state.vertex_type & GE_VTYPE_IDX_MASK) != GE_VTYPE_IDX_NONE) {
-            lower = 0;
-            upper = 0;
             GetIndexBounds((void *)state.index_addr, count, state.vertex_type, &lower, &upper);
+            // Fixes menu rendering of Harvest Moon
+            upper += 1;
           }
 
-          // Indexed draws causes glitches in Metal Gear Solid
-          // Maybe implementation is wrong? Disabling for now
-          if ((state.vertex_type & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_NONE) {
-            int pos = (state.vertex_type & GE_VTYPE_POS_MASK) >> GE_VTYPE_POS_SHIFT;
-            int pos_size = possize[pos] / 3;
+          int pos = (state.vertex_type & GE_VTYPE_POS_MASK) >> GE_VTYPE_POS_SHIFT;
+          int pos_size = possize[pos] / 3;
 
-            // TODO: we may patch the same vertex again and again...
-            int i;
-            for (i = lower; i < upper; i++) {
-              int j;
-              for (j = 0; j < 2; j++) {
-                u32 addr = state.vertex_addr + i * vertex_size + pos_off + j * pos_size;
-                switch (pos_size) {
-                  case 2:
-                    if (*(short *)addr == 480 || *(short *)addr == 960)
-                      *(short *)addr = 960;
-                    else if (*(short *)addr == 272 || *(short *)addr == 544)
-                      *(short *)addr = 544;
-                    else if (*(short *)addr > -2048 && *(short *)addr < 2048)
-                      *(short *)addr *= 2;
-                    break;
-                  case 4:
-                    t.i = *(u32 *)addr;
-                    if (t.f == 480 || t.f == 960) {
-                      t.f = 960;
-                      *(u32 *)addr = t.i;
-                    } else if (t.f == 272 || t.f == 544) {
-                      t.f = 544;
-                      *(u32 *)addr = t.i;
-                    } else if (t.f > -2048 && t.f < 2048) {
-                      t.f *= 2;
-                      *(u32 *)addr = t.i;
-                    }
-                    break;
-                }
+          // TODO: we may patch the same vertex again and again...
+          int i;
+          for (i = lower; i < upper; i++) {
+            int j;
+            for (j = 0; j < 2; j++) {
+              u32 addr = state.vertex_addr + i * vertex_size + pos_off + j * pos_size;
+              switch (pos_size) {
+                case 2:
+                  if (*(short *)addr == 480 || *(short *)addr == 960)
+                    *(short *)addr = 960;
+                  else if (*(short *)addr == 272 || *(short *)addr == 544)
+                    *(short *)addr = 544;
+                  else if (*(short *)addr > -2048 && *(short *)addr < 2048)
+                    *(short *)addr *= 2;
+                  break;
+                case 4:
+                  t.i = *(u32 *)addr;
+                  if (t.f == 480 || t.f == 960) {
+                    t.f = 960;
+                    *(u32 *)addr = t.i;
+                  } else if (t.f == 272 || t.f == 544) {
+                    t.f = 544;
+                    *(u32 *)addr = t.i;
+                  } else if (t.f > -2048 && t.f < 2048) {
+                    t.f *= 2;
+                    *(u32 *)addr = t.i;
+                  }
+                  break;
               }
             }
           }
