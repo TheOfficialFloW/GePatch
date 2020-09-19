@@ -576,7 +576,7 @@ void patchGeList(u32 *list, u32 *stall) {
 
         if (state.texbufptr[index] && state.texbufwidth[index]) {
           u32 texaddr = ((state.texbufwidth[index] & 0x0f0000) << 8) | (state.texbufptr[index] & 0xffffff);
-          if (findFramebuf(texaddr) >= 0 || (texaddr >= 0x04000000 && texaddr < 0x04200000)) {
+          if (findFramebuf(texaddr) >= 0) {
             state.ignore_texture = 1;
           } else {
             state.ignore_texture = 0;
