@@ -19,7 +19,9 @@ PSP_MODULE_INFO("GePatch", 0x1007, 1, 0);
 #define HEIGHT 544
 #define PIXELFORMAT GE_FORMAT_565
 
-#define FAKE_VRAM 0x0B000000 // Assassins Creed needs a fake fram with 24bits of zero
+// Assassins Creed needs a fake fram with 24bits of zero, though some games like
+// Patapon crash when using address 0x0B000000
+#define FAKE_VRAM 0x0A200000
 #define DISPLAY_BUFFER 0x0A000000
 #define VERTICES_BUFFER 0x0A400000
 #define RENDER_LIST 0x0A800000
@@ -187,7 +189,7 @@ typedef struct {
   StackEntry stack[64];
   u32 curr_stack;
 
-  u32 framebuf_addr[64];
+  u32 framebuf_addr[16];
   u32 framebuf_count;
 } GeState;
 
@@ -480,18 +482,21 @@ void patchGeList(u32 *list, u32 *stall) {
                       *(short *)addr = 960;
                     else if (*(short *)addr == 272 || *(short *)addr == 544)
                       *(short *)addr = 544;
-                    else
+                    else if (*(short *)addr > -2048 && *(short *)addr < 2048)
                       *(short *)addr *= 2;
                     break;
                   case 4:
                     t.i = *(u32 *)addr;
-                    if (t.f == 480 || t.f == 960)
+                    if (t.f == 480 || t.f == 960) {
                       t.f = 960;
-                    else if (t.f == 272 || t.f == 544)
+                      *(u32 *)addr = t.i;
+                    } else if (t.f == 272 || t.f == 544) {
                       t.f = 544;
-                    else
+                      *(u32 *)addr = t.i;
+                    } else if (t.f > -2048 && t.f < 2048) {
                       t.f *= 2;
-                    *(u32 *)addr = t.i;
+                      *(u32 *)addr = t.i;
+                    }
                     break;
                 }
               }
@@ -577,6 +582,7 @@ void patchGeList(u32 *list, u32 *stall) {
         if (state.texbufptr[index] && state.texbufwidth[index]) {
           u32 texaddr = ((state.texbufwidth[index] & 0x0f0000) << 8) | (state.texbufptr[index] & 0xffffff);
           if (findFramebuf(texaddr) >= 0) {
+            // Causes issues in Tekken 6
             state.ignore_texture = 1;
           } else {
             state.ignore_texture = 0;
