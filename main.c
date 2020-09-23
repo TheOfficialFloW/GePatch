@@ -19,11 +19,9 @@ PSP_MODULE_INFO("GePatch", 0x1007, 1, 0);
 #define HEIGHT 544
 #define PIXELFORMAT GE_FORMAT_565
 
-// Assassins Creed needs a fake fram with 24bits of zero, though some games like
-// Patapon crash when using address 0x0B000000
-#define FAKE_VRAM 0x0A200000
-#define DISPLAY_BUFFER 0x0A000000
-#define VERTICES_BUFFER 0x0A400000
+#define FAKE_VRAM 0x0A000000
+#define DISPLAY_BUFFER 0x0A400000
+#define VERTICES_BUFFER 0x0A600000
 #define RENDER_LIST 0x0A800000
 
 #define VRAM_DRAW_BUFFER_OFFSET 0x04000000
@@ -58,7 +56,7 @@ static const u8 wtsize[4] = { 0, 1, 2, 4 }, wtalign[4] = { 0, 1, 2, 4 };
 
 #define ALIGN(x, align) (((x) + ((align) - 1)) & ~((align) - 1))
 
-void getVertexSizeAndPositionOffset(u32 op, u8 *vertex_size, u8 *pos_off) {
+void getVertexInfo(u32 op, u8 *vertex_size, u8 *pos_off, u8 *visit_off) {
   int tc = (op & GE_VTYPE_TC_MASK) >> GE_VTYPE_TC_SHIFT;
   int col = (op & GE_VTYPE_COL_MASK) >> GE_VTYPE_COL_SHIFT;
   int nrm = (op & GE_VTYPE_NRM_MASK) >> GE_VTYPE_NRM_SHIFT;
@@ -69,53 +67,72 @@ void getVertexSizeAndPositionOffset(u32 op, u8 *vertex_size, u8 *pos_off) {
 
   u8 biggest = 0;
   u8 size = 0;
-  u8 weightoff = 0, tcoff = 0, coloff = 0, nrmoff = 0, posoff = 0;
+  u8 aligned_size = 0;
+  // u8 weightoff = 0, tcoff = 0, coloff = 0, nrmoff = 0;
+  u8 posoff = 0;
+  u8 visitoff = 0;
 
   if (weight) {
-    size = ALIGN(size, wtalign[weight]);
-    weightoff = size;
+    // size = ALIGN(size, wtalign[weight]);
+    // weightoff = size;
     size += wtsize[weight] * weightCount;
     if (wtalign[weight] > biggest)
       biggest = wtalign[weight];
   }
 
   if (tc) {
-    size = ALIGN(size, tcalign[tc]);
-    tcoff = size;
+    aligned_size = ALIGN(size, tcalign[tc]);
+    if (!visitoff && aligned_size != size)
+      visitoff = size;
+    size = aligned_size;
+    // tcoff = size;
     size += tcsize[tc];
     if (tcalign[tc] > biggest)
       biggest = tcalign[tc];
   }
 
   if (col) {
-    size = ALIGN(size, colalign[col]);
-    coloff = size;
+    aligned_size = ALIGN(size, colalign[col]);
+    if (!visitoff && aligned_size != size)
+      visitoff = size;
+    size = aligned_size;
+    // coloff = size;
     size += colsize[col];
     if (colalign[col] > biggest)
       biggest = colalign[col];
   }
 
   if (nrm) {
-    size = ALIGN(size, nrmalign[nrm]);
-    nrmoff = size;
+    aligned_size = ALIGN(size, nrmalign[nrm]);
+    if (!visitoff && aligned_size != size)
+      visitoff = size;
+    size = aligned_size;
+    // nrmoff = size;
     size += nrmsize[nrm];
     if (nrmalign[nrm] > biggest)
       biggest = nrmalign[nrm];
   }
 
   if (pos) {
-    size = ALIGN(size, posalign[pos]);
+    aligned_size = ALIGN(size, posalign[pos]);
+    if (!visitoff && aligned_size != size)
+      visitoff = size;
+    size = aligned_size;
     posoff = size;
     size += possize[pos];
     if (posalign[pos] > biggest)
       biggest = posalign[pos];
   }
 
-  size = ALIGN(size, biggest);
+  aligned_size = ALIGN(size, biggest);
+  if (!visitoff && aligned_size != size)
+    visitoff = size;
+  size = aligned_size;
   size *= morphCount;
 
   *vertex_size = size;
   *pos_off = posoff;
+  *visit_off = visitoff;
 }
 
 void GetIndexBounds(const void *inds, int count, u32 vertType, u16 *indexLowerBound, u16 *indexUpperBound) {
@@ -415,8 +432,8 @@ void patchGeList(u32 *list, u32 *stall) {
 
           u32 count = num_points_u * num_points_v;
 
-          u8 vertex_size = 0, pos_off = 0;
-          getVertexSizeAndPositionOffset(state.vertex_type, &vertex_size, &pos_off);
+          u8 vertex_size = 0, pos_off = 0, visit_off = 0;
+          getVertexInfo(state.vertex_type, &vertex_size, &pos_off, &visit_off);
 
           AdvanceVerts(count, vertex_size);
         }
@@ -432,8 +449,8 @@ void patchGeList(u32 *list, u32 *stall) {
         if ((state.vertex_type & GE_VTYPE_THROUGH_MASK) == GE_VTYPE_THROUGH) {
           u32 count = data;
 
-          u8 vertex_size = 0, pos_off = 0;
-          getVertexSizeAndPositionOffset(state.vertex_type, &vertex_size, &pos_off);
+          u8 vertex_size = 0, pos_off = 0, visit_off = 0;
+          getVertexInfo(state.vertex_type, &vertex_size, &pos_off, &visit_off);
 
           AdvanceVerts(count, vertex_size);
         }
@@ -453,14 +470,13 @@ void patchGeList(u32 *list, u32 *stall) {
         if ((state.vertex_type & GE_VTYPE_THROUGH_MASK) == GE_VTYPE_THROUGH) {
           u16 count = data & 0xffff;
 
-          u8 vertex_size = 0, pos_off = 0;
-          getVertexSizeAndPositionOffset(state.vertex_type, &vertex_size, &pos_off);
+          u8 vertex_size = 0, pos_off = 0, visit_off = 0;
+          getVertexInfo(state.vertex_type, &vertex_size, &pos_off, &visit_off);
 
           u16 lower = 0;
           u16 upper = count;
           if ((state.vertex_type & GE_VTYPE_IDX_MASK) != GE_VTYPE_IDX_NONE) {
             GetIndexBounds((void *)state.index_addr, count, state.vertex_type, &lower, &upper);
-            // Fixes menu rendering of Harvest Moon
             upper += 1;
           }
 
@@ -468,37 +484,89 @@ void patchGeList(u32 *list, u32 *stall) {
           int pos_size = possize[pos] / 3;
 
           // TODO: we may patch the same vertex again and again...
+          u8 decoded = 0, encoded = 0;
+          u32 vertex_addr = state.vertex_addr;
           int i;
-          for (i = lower; i < upper; i++) {
+          for (i = lower; i < upper; i++, vertex_addr += vertex_size) {
             int j;
             for (j = 0; j < 2; j++) {
-              u32 addr = state.vertex_addr + i * vertex_size + pos_off + j * pos_size;
+              u32 addr = vertex_addr + pos_off + j * pos_size;
               switch (pos_size) {
                 case 2:
-                  if (*(short *)addr == 480 || *(short *)addr == 960)
-                    *(short *)addr = 960;
-                  else if (*(short *)addr == 272 || *(short *)addr == 544)
-                    *(short *)addr = 544;
-                  else if (*(short *)addr > -2048 && *(short *)addr < 2048)
-                    *(short *)addr *= 2;
-                  break;
-                case 4:
-                  t.i = *(u32 *)addr;
-                  if (t.f == 480 || t.f == 960) {
-                    t.f = 960;
-                    *(u32 *)addr = t.i;
-                  } else if (t.f == 272 || t.f == 544) {
-                    t.f = 544;
-                    *(u32 *)addr = t.i;
-                  } else if (t.f > -2048 && t.f < 2048) {
-                    t.f *= 2;
-                    *(u32 *)addr = t.i;
+                {
+                  short val = *(short *)addr;
+                  if (val != 0) {
+                    // Decode and check if we already doubled at least one of the vertices
+                    // If that's the case, let's assume all other vertices have been doubled, too
+                    if (!decoded && visit_off && upper - i >= 2) {
+                      if (*(u8 *)(vertex_addr + visit_off + 0 * vertex_size) == ((val >> 0) & 0xff) &&
+                          *(u8 *)(vertex_addr + visit_off + 1 * vertex_size) == ((val >> 8) & 0xff)) {
+                        goto exit_loop;
+                      }
+                      decoded = 1;
+                    }
+
+                    if (val == 480 || val == 960)
+                      *(short *)addr = 960;
+                    else if (val == 272 || val == 544)
+                      *(short *)addr = 544;
+                    else if (val > -2048 && val < 2048)
+                      *(short *)addr *= 2;
+
+                    // Encode that we already doubled one of the vertices
+                    if (!encoded && visit_off && upper - i >= 2) {
+                      val = *(short *)addr;
+                      *(u8 *)(vertex_addr + visit_off + 0 * vertex_size) = (val >> 0) & 0xff;
+                      *(u8 *)(vertex_addr + visit_off + 1 * vertex_size) = (val >> 8) & 0xff;
+                      encoded = 1;
+                    }
                   }
                   break;
+                }
+
+                case 4:
+                {
+                  t.i = *(u32 *)addr;
+                  if (t.f != 0) {
+                    // Decode and check if we already doubled at least one of the vertices
+                    // If that's the case, let's assume all other vertices have been doubled, too
+                    if (!decoded && visit_off && upper - i >= 4) {
+                      if (*(u8 *)(vertex_addr + visit_off + 0 * vertex_size) == ((t.i >> 0) & 0xff) &&
+                          *(u8 *)(vertex_addr + visit_off + 1 * vertex_size) == ((t.i >> 8) & 0xff) &&
+                          *(u8 *)(vertex_addr + visit_off + 2 * vertex_size) == ((t.i >> 16) & 0xff) &&
+                          *(u8 *)(vertex_addr + visit_off + 3 * vertex_size) == ((t.i >> 24) & 0xff)) {
+                        goto exit_loop;
+                      }
+                      decoded = 1;
+                    }
+
+                    if (t.f == 480 || t.f == 960) {
+                      t.f = 960;
+                      *(u32 *)addr = t.i;
+                    } else if (t.f == 272 || t.f == 544) {
+                      t.f = 544;
+                      *(u32 *)addr = t.i;
+                    } else if (t.f > -2048 && t.f < 2048) {
+                      t.f *= 2;
+                      *(u32 *)addr = t.i;
+                    }
+
+                    // Encode that we already doubled one of the vertices
+                    if (!encoded && visit_off && upper - i >= 4) {
+                      *(u8 *)(vertex_addr + visit_off + 0 * vertex_size) = (t.i >> 0) & 0xff;
+                      *(u8 *)(vertex_addr + visit_off + 1 * vertex_size) = (t.i >> 8) & 0xff;
+                      *(u8 *)(vertex_addr + visit_off + 2 * vertex_size) = (t.i >> 16) & 0xff;
+                      *(u8 *)(vertex_addr + visit_off + 3 * vertex_size) = (t.i >> 24) & 0xff;
+                      encoded = 1;
+                    }
+                  }
+                  break;
+                }
               }
             }
           }
 
+exit_loop:
           AdvanceVerts(count, vertex_size);
         }
 
@@ -636,6 +704,7 @@ void patchGeList(u32 *list, u32 *stall) {
 }
 
 void *(* _sceGeEdramGetAddr)(void);
+unsigned int *(* _sceGeEdramGetSize)(void);
 int (* _sceGeGetList)(int qid, void *list, int *flag);
 int (* _sceGeListUpdateStallAddr)(int qid, void *stall);
 int (* _sceGeListEnQueue)(const void *list, void *stall, int cbid, PspGeListArgs *arg);
@@ -649,16 +718,23 @@ void *sceGeEdramGetAddrPatched(void) {
   return (void *)FAKE_VRAM;
 }
 
+unsigned int sceGeEdramGetSizePatched(void) {
+  return 4 * 1024 * 1024;
+}
+
 int sceGeListUpdateStallAddrPatched(int qid, void *stall) {
   int k1 = pspSdkSetK1(0);
   char info[64];
   if (_sceGeGetList(qid, info, NULL) == 0) {
-    void *list = *(void **)(info + 0x18); // previous stall
-    if (!list)
-      list = *(void **)(info + 0x14); // list
-    if (((u32)list & 0x0fffffff) < ((u32)stall & 0x0fffffff)) {
-      patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
-      sceKernelDcacheWritebackInvalidateAll();
+    u16 state = *(u16 *)(info + 0x08);
+    if (state != 3) { // completed
+      void *list = *(void **)(info + 0x18); // previous stall
+      if (!list)
+        list = *(void **)(info + 0x14); // list
+      if (((u32)list & 0x0fffffff) < ((u32)stall & 0x0fffffff)) {
+        patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
+        sceKernelDcacheWritebackInvalidateAll();
+      }
     }
   }
   pspSdkSetK1(k1);
@@ -666,20 +742,16 @@ int sceGeListUpdateStallAddrPatched(int qid, void *stall) {
 }
 
 int sceGeListEnQueuePatched(const void *list, void *stall, int cbid, PspGeListArgs *arg) {
-  int k1 = pspSdkSetK1(0);
   resetGeState();
   patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
   sceKernelDcacheWritebackInvalidateAll();
-  pspSdkSetK1(k1);
   return _sceGeListEnQueue(list, stall, cbid, arg);
 }
 
 int sceGeListEnQueueHeadPatched(const void *list, void *stall, int cbid, PspGeListArgs *arg) {
-  int k1 = pspSdkSetK1(0);
   resetGeState();
   patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
   sceKernelDcacheWritebackInvalidateAll();
-  pspSdkSetK1(k1);
   return _sceGeListEnQueueHead(list, stall, cbid, arg);
 }
 
@@ -733,6 +805,7 @@ int draw_thread(SceSize args, void *argp) {
 
 int module_start(SceSize args, void *argp) {
   _sceGeEdramGetAddr = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0xE47E40E4);
+  _sceGeEdramGetSize = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0x1F6752AD);
   _sceGeGetList = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0x67B01D8E);
   _sceGeListUpdateStallAddr = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0xE0D68148);
   _sceGeListEnQueue = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0xAB49E76A);
@@ -741,6 +814,7 @@ int module_start(SceSize args, void *argp) {
   _sceGeDrawSync = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0xB287BD61);
 
   sctrlHENPatchSyscall((u32)_sceGeEdramGetAddr, sceGeEdramGetAddrPatched);
+  sctrlHENPatchSyscall((u32)_sceGeEdramGetSize, sceGeEdramGetSizePatched);
   sctrlHENPatchSyscall((u32)_sceGeListUpdateStallAddr, sceGeListUpdateStallAddrPatched);
   sctrlHENPatchSyscall((u32)_sceGeListEnQueue, sceGeListEnQueuePatched);
   sctrlHENPatchSyscall((u32)_sceGeListEnQueueHead, sceGeListEnQueueHeadPatched);

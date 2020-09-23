@@ -6,6 +6,13 @@ This is an experimental plugin for [Adrenaline](https://github.com/TheOfficialFl
 
 Please help testing games and filling out the [spreadsheet](https://docs.google.com/spreadsheets/d/1aZlmKwELcdpCb9ezI5iRfgcX9hoGxgL4tNC-673aKqk/edit#gid=0).
 
+## Changelog v0.17.2
+
+**This must be used with Adrenaline-7, not Adrenaline-6.9!**
+
+- Changed fake vram address to allow more games to work.
+- Added patch to allow games to use more memory of fake vram to store textures.
+
 ## Changelog v0.17.1
 
 - Fixed indexed draws which caused some games to render at 480x272 only.
@@ -45,17 +52,21 @@ Please help testing games and filling out the [spreadsheet](https://docs.google.
 
 ## Installation
 
-- Before you start, make sure you have Adrenaline 6.9 or higher and disable all other plugins in `ux0:pspemu/seplugins/game.txt` (remove all lines or set to 0).
+- Before you start make sure that you have
 
-- Download [ge_patch.prx](https://github.com/TheOfficialFloW/GePatch/releases).
+  - Adrenaline 7 or higher.
+  - The option `Recovery Menu->Advanced->Advanced configuration->Force high memory layout` **DISABLED**.
+  - All plugins in `ux0:pspemu/seplugins/game.txt` and `ux0:pspemu/seplugins/vsh.txt` disabled (you can gradually enable them if you think they should not interfere with GePatch. Please be aware that plugins that print stuff to the screen may not be visible with GePatch since the framebuffer is redirected.
 
-- Copy it to `ux0:pspemu/seplugins/`.
+- Download [ge_patch.prx](https://github.com/TheOfficialFloW/GePatch/releases) and copy it to `ux0:pspemu/seplugins/`.
 
-- Write this line to `ux0:pspemu/seplugins/game.txt`:
+- Write this line to `ux0:pspemu/seplugins/game.txt` (`ux0:pspemu` is mounted as `ms0:` in the PSP emu):
 
   ```
   ms0:/seplugins/ge_patch.prx 1
   ```
+
+  You can also do the same change in file `ux0:pspemu/seplugins/vsh.txt` to get a XMB in higher resolution, but be aware that the VSH menu will be invisible.
 
 ## Known Issues
 
@@ -64,6 +75,7 @@ Some games may:
 - Not display cutscenes.
 - Have a black screen.
 - Not display all textures.
+- Contain clipping/culling.
 
 ## Donation
 
