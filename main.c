@@ -593,7 +593,7 @@ exit_loop:
           u32 framebuf = FAKE_VRAM | (state.framebufptr & 0xffffff);
           u32 pitch = state.framebufwidth & 0xffff;
 
-          if (pitch == 512) {
+          if (pitch == 512 || pitch == 480 || pitch == 960) {
             state.ignore_framebuf = 0;
           } else {
             // *state.framebufwidth_addr = (GE_CMD_FRAMEBUFWIDTH << 24) | ((VRAM_1KB >> 24) << 16) | 0;
