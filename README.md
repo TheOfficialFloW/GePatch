@@ -6,12 +6,13 @@ This is an experimental plugin for [Adrenaline](https://github.com/TheOfficialFl
 
 Please help testing games and filling out the [spreadsheet](https://docs.google.com/spreadsheets/d/1aZlmKwELcdpCb9ezI5iRfgcX9hoGxgL4tNC-673aKqk/edit#gid=0).
 
-## Changelog v0.17.2
+## Changelog v0.18
 
 **This must be used with Adrenaline-7, not Adrenaline-6.9!**
 
 - Changed fake vram address to allow more games to work.
 - Added patch to allow games to use more memory of fake vram to store textures.
+- Added optimization to prevent double patching of vertices. May increase performance in some games and prevent overzoomed textures.
 
 ## Changelog v0.17.1
 
