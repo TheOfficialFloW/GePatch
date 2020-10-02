@@ -8,7 +8,7 @@ Please help testing games and filling out the [spreadsheet](https://docs.google.
 
 ## Changelog v0.19
 
-- Fixed a small bug that were introduced earlier.
+- Fixed a small bug that was introduced earlier.
 - Fixed a few bugs that caused certain games to crash.
 
 ## Changelog v0.18.1
