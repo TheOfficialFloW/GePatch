@@ -6,6 +6,11 @@ This is an experimental plugin for [Adrenaline](https://github.com/TheOfficialFl
 
 Please help testing games and filling out the [spreadsheet](https://docs.google.com/spreadsheets/d/1aZlmKwELcdpCb9ezI5iRfgcX9hoGxgL4tNC-673aKqk/edit#gid=0).
 
+## Changelog v0.19
+
+- Fixed a small bug that were introduced earlier.
+- Fixed a few bugs that caused certain games to crash.
+
 ## Changelog v0.18.1
 
 **This must be used with Adrenaline-7, not Adrenaline-6.9!**

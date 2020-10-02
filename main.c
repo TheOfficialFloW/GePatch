@@ -48,6 +48,18 @@ void logmsg(char *msg) {
   pspSdkSetK1(k1);
 }
 
+int checkAddress(u32 addr) {
+  addr &= 0x0fffffff;
+  if (addr >= 0x08400000 && addr < 0x0A400000)
+    return 0;
+  if (addr >= 0x04000000 && addr < 0x04200000) {
+    // log("vram address: %08x\n", addr);
+    return -1;
+  }
+  log("invalid address: %08x\n", addr);
+  return -1;
+}
+
 static const u8 tcsize[4] = { 0, 2, 4, 8 }, tcalign[4] = { 0, 1, 2, 4 };
 static const u8 colsize[8] = { 0, 0, 0, 0, 2, 2, 2, 4 }, colalign[8] = { 0, 0, 0, 0, 2, 2, 2, 4 };
 static const u8 nrmsize[4] = { 0, 3, 6, 12 }, nrmalign[4] = { 0, 1, 2, 4 };
@@ -177,6 +189,7 @@ void GetIndexBounds(const void *inds, int count, u32 vertType, u16 *indexLowerBo
 
 typedef struct {
   u32 list;
+  u32 base;
   u32 offset;
 } StackEntry;
 
@@ -219,21 +232,19 @@ void resetGeState() {
   memset(&state, 0, sizeof(GeState));
 }
 
-int push(StackEntry data) {
+int push(StackEntry *data) {
   if (state.curr_stack < (sizeof(state.stack) / sizeof(StackEntry))) {
-    state.stack[state.curr_stack++] = data;
+    memcpy(&state.stack[state.curr_stack++], data, sizeof(StackEntry));
     return 0;
   }
+
   return -1;
 }
 
-StackEntry pop() {
+StackEntry *pop() {
   if (state.curr_stack > 0)
-    return state.stack[--state.curr_stack];
-  StackEntry stack_entry;
-  stack_entry.list = -1;
-  stack_entry.offset = -1;
-  return stack_entry;
+    return &state.stack[--state.curr_stack];
+  return NULL;
 }
 
 int findFramebuf(u32 framebuf) {
@@ -272,133 +283,19 @@ void AdvanceVerts(int count, int vertex_size) {
 }
 
 // TODO: when ignore_framebuf=1 or ignore_texture=1, dummy all non-control-flow instructions
-u32 *handleControlFlowCommands(u32 *list) {
-  StackEntry stack_entry;
-
-  u32 op = *list;
-  u32 cmd = op >> 24;
-  u32 data = op & 0xffffff;
-
-  switch (cmd) {
-    case GE_CMD_BASE:
-      state.base = (data << 8) & 0x0f000000;
-      break;
-
-    case GE_CMD_OFFSETADDR:
-      state.offset = data << 8;
-      break;
-
-    case GE_CMD_ORIGIN:
-      state.offset = (u32)list;
-      break;
-
-    // TODO: need to save other states, too?
-    case GE_CMD_CALL:
-      state.address = ((state.base | data) + state.offset) & 0x0ffffffc;
-      stack_entry.list = (u32)list;
-      stack_entry.offset = state.offset;
-      if (push(stack_entry) == 0)
-        list = (u32 *)(state.address - 4);
-      break;
-
-    // TODO: is it okay to always take the branch?
-    case GE_CMD_BJUMP:
-      state.address = ((state.base | data) + state.offset) & 0x0ffffffc;
-      list = (u32 *)(state.address - 4);
-      break;
-
-    case GE_CMD_JUMP:
-      state.address = ((state.base | data) + state.offset) & 0x0ffffffc;
-      list = (u32 *)(state.address - 4);
-      break;
-
-    case GE_CMD_RET:
-    {
-      // Ignore returns when the stack is empty
-      stack_entry = pop();
-      if (stack_entry.list != -1) {
-        list = (u32 *)stack_entry.list;
-        state.offset = stack_entry.offset;
-      }
-      break;
-    }
-
-    case GE_CMD_END:
-    {
-      u32 prev = *(list-1);
-      switch (prev >> 24) {
-        case GE_CMD_SIGNAL:
-        {
-          u8 behaviour = (prev >> 16) & 0xff;
-          u16 signal = prev & 0xffff;
-          u16 enddata = data & 0xffff;
-          u32 target;
-
-          state.sync = 0;
-
-          switch (behaviour) {
-            case PSP_GE_SIGNAL_SYNC:
-              state.sync = 1;
-              break;
-
-            case PSP_GE_SIGNAL_JUMP:
-              target = (((signal << 16) | enddata) & 0x0ffffffc);
-              list = (u32 *)(target - 4);
-              break;
-
-            case PSP_GE_SIGNAL_CALL:
-              target = (((signal << 16) | enddata) & 0x0ffffffc);
-              stack_entry.list = (u32)list;
-              stack_entry.offset = state.offset;
-              if (push(stack_entry) == 0)
-                list = (u32 *)(target - 4);
-              break;
-
-            case PSP_GE_SIGNAL_RET:
-              // Ignore returns when the stack is empty
-              stack_entry = pop();
-              if (stack_entry.list != -1) {
-                list = (u32 *)stack_entry.list;
-                state.offset = stack_entry.offset;
-              }
-              break;
-
-            default:
-              break;
-          }
-          break;
-        }
-
-        case GE_CMD_FINISH:
-          // After syncing, finish is ignored?
-          if (state.sync) {
-            state.sync = 0;
-            break;
-          }
-          // resetGeState();
-          state.finished = 1;
-          return NULL;
-
-        default:
-          break;
-      }
-      break;
-    }
-
-    default:
-      break;
-  }
-
-  return list;
-}
-
 void patchGeList(u32 *list, u32 *stall) {
   union {
     float f;
     unsigned int i;
   } t;
 
-  for (; !stall || (stall && list != stall); list++) {
+  StackEntry *stack_entry;
+  StackEntry stack_entry_buf;
+
+  for (; list && (!stall || (stall && list != stall)); list++) {
+    // if (checkAddress((u32)list) < 0)
+      // goto finish;
+
     u32 op = *list;
     u32 cmd = op >> 24;
     u32 data = op & 0xffffff;
@@ -406,6 +303,147 @@ void patchGeList(u32 *list, u32 *stall) {
     state.ge_cmds[cmd] = op;
 
     switch (cmd) {
+      // Skip matrix data
+
+      case GE_CMD_BONEMATRIXNUMBER:
+        if (*(list+12) >> 24 == GE_CMD_BONEMATRIXDATA)
+          list += 12;
+        break;
+
+      case GE_CMD_WORLDMATRIXNUMBER:
+        if (*(list+12) >> 24 == GE_CMD_WORLDMATRIXDATA)
+          list += 12;
+        break;
+
+      case GE_CMD_VIEWMATRIXNUMBER:
+        if (*(list+12) >> 24 == GE_CMD_VIEWMATRIXDATA)
+          list += 12;
+        break;
+
+      case GE_CMD_TGENMATRIXNUMBER:
+        if (*(list+12) >> 24 == GE_CMD_TGENMATRIXDATA)
+          list += 12;
+        break;
+
+      case GE_CMD_PROJMATRIXNUMBER:
+        if (*(list+16) >> 24 == GE_CMD_PROJMATRIXDATA)
+          list += 16;
+        break;
+
+      // Handle control flow commands
+
+      case GE_CMD_BASE:
+        state.base = (data << 8) & 0x0f000000;
+        break;
+
+      case GE_CMD_OFFSETADDR:
+        state.offset = data << 8;
+        break;
+
+      case GE_CMD_ORIGIN:
+        state.offset = (u32)list;
+        break;
+
+      // TODO: need to save other states, too?
+      case GE_CMD_CALL:
+        state.address = ((state.base | data) + state.offset) & 0x0ffffffc;
+        stack_entry = &stack_entry_buf;
+        stack_entry->list = (u32)list;
+        stack_entry->offset = state.offset;
+        if (push(stack_entry) == 0) {
+          list = (u32 *)(state.address - 4);
+        }
+        break;
+
+      // TODO: is it okay to always take the branch?
+      case GE_CMD_BJUMP:
+        state.address = ((state.base | data) + state.offset) & 0x0ffffffc;
+        list = (u32 *)(state.address - 4);
+        break;
+
+      case GE_CMD_JUMP:
+        state.address = ((state.base | data) + state.offset) & 0x0ffffffc;
+        list = (u32 *)(state.address - 4);
+        break;
+
+      case GE_CMD_RET:
+      {
+        // Ignore returns when the stack is empty
+        stack_entry = pop();
+        if (stack_entry) {
+          list = (u32 *)stack_entry->list;
+          state.offset = stack_entry->offset;
+        }
+        break;
+      }
+
+      case GE_CMD_END:
+      {
+        u32 prev = *(list-1);
+        switch (prev >> 24) {
+          case GE_CMD_SIGNAL:
+          {
+            u8 behaviour = (prev >> 16) & 0xff;
+            u16 signal = prev & 0xffff;
+            u16 enddata = data & 0xffff;
+            u32 target;
+
+            state.sync = 0;
+
+            switch (behaviour) {
+              case PSP_GE_SIGNAL_SYNC:
+                state.sync = 1;
+                break;
+
+              case PSP_GE_SIGNAL_JUMP:
+                target = (((signal << 16) | enddata) & 0x0ffffffc);
+                list = (u32 *)(target - 4);
+                break;
+
+              case PSP_GE_SIGNAL_CALL:
+                target = (((signal << 16) | enddata) & 0x0ffffffc);
+                stack_entry = &stack_entry_buf;
+                stack_entry->list = (u32)list;
+                stack_entry->base = state.base;
+                stack_entry->offset = state.offset;
+                if (push(stack_entry) == 0)
+                  list = (u32 *)(target - 4);
+                break;
+
+              case PSP_GE_SIGNAL_RET:
+                // Ignore returns when the stack is empty
+                stack_entry = pop();
+                if (stack_entry) {
+                  list = (u32 *)stack_entry->list;
+                  state.base = stack_entry->base;
+                  state.offset = stack_entry->offset;
+                }
+                break;
+
+              default:
+                break;
+            }
+            break;
+          }
+
+          case GE_CMD_FINISH:
+            // After syncing, finish is ignored?
+            if (state.sync) {
+              state.sync = 0;
+              break;
+            }
+            // resetGeState();
+            state.finished = 1;
+            goto finish;
+
+          default:
+            break;
+        }
+        break;
+      }
+
+      // Patch vertices
+
       case GE_CMD_IADDR:
         state.index_addr = ((state.base | data) + state.offset) & 0x0fffffff;
         break;
@@ -485,7 +523,7 @@ void patchGeList(u32 *list, u32 *stall) {
 
           // TODO: we may patch the same vertex again and again...
           u8 decoded = 0, encoded = 0;
-          u32 vertex_addr = state.vertex_addr;
+          u32 vertex_addr = state.vertex_addr + lower * vertex_size;
           int i;
           for (i = lower; i < upper; i++, vertex_addr += vertex_size) {
             int j;
@@ -573,6 +611,8 @@ exit_loop:
         break;
       }
 
+      // Patch GE commands
+
       case GE_CMD_FRAMEBUFPIXFORMAT:
         *list = (cmd << 24) | PIXELFORMAT;
         break;
@@ -593,6 +633,7 @@ exit_loop:
           u32 framebuf = FAKE_VRAM | (state.framebufptr & 0xffffff);
           u32 pitch = state.framebufwidth & 0xffff;
 
+          // This allows more games to work, but causes weird triangles in Sonic.
           if (pitch == 512 || pitch == 480 || pitch == 960) {
             state.ignore_framebuf = 0;
           } else {
@@ -646,7 +687,6 @@ exit_loop:
         if (state.texbufptr[index] && state.texbufwidth[index]) {
           u32 texaddr = ((state.texbufwidth[index] & 0x0f0000) << 8) | (state.texbufptr[index] & 0xffffff);
           if (findFramebuf(texaddr) >= 0) {
-            // Causes issues in Tekken 6
             state.ignore_texture = 1;
           } else {
             state.ignore_texture = 0;
@@ -660,14 +700,12 @@ exit_loop:
       }
 
       case GE_CMD_VIEWPORTXSCALE:
-        t.i = data << 8;
-        t.f = (t.f < 0) ? -(WIDTH / 2) : (WIDTH / 2);
+        t.f = ((data << 8) >> 31) ? -(WIDTH / 2) : (WIDTH / 2);
         *list = (cmd << 24) | (t.i >> 8);
         break;
 
       case GE_CMD_VIEWPORTYSCALE:
-        t.i = data << 8;
-        t.f = (t.f < 0) ? -(HEIGHT / 2) : (HEIGHT / 2);
+        t.f = ((data << 8) >> 31) ? -(HEIGHT / 2) : (HEIGHT / 2);
         *list = (cmd << 24) | (t.i >> 8);
         break;
 
@@ -695,12 +733,12 @@ exit_loop:
         break;
 
       default:
-        list = handleControlFlowCommands(list);
-        if (!list)
-          return;
         break;
     }
   }
+
+finish:
+  sceKernelDcacheWritebackInvalidateAll();
 }
 
 void *(* _sceGeEdramGetAddr)(void);
@@ -733,7 +771,6 @@ int sceGeListUpdateStallAddrPatched(int qid, void *stall) {
         list = *(void **)(info + 0x14); // list
       if (((u32)list & 0x0fffffff) < ((u32)stall & 0x0fffffff)) {
         patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
-        sceKernelDcacheWritebackInvalidateAll();
       }
     }
   }
@@ -744,14 +781,12 @@ int sceGeListUpdateStallAddrPatched(int qid, void *stall) {
 int sceGeListEnQueuePatched(const void *list, void *stall, int cbid, PspGeListArgs *arg) {
   resetGeState();
   patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
-  sceKernelDcacheWritebackInvalidateAll();
   return _sceGeListEnQueue(list, stall, cbid, arg);
 }
 
 int sceGeListEnQueueHeadPatched(const void *list, void *stall, int cbid, PspGeListArgs *arg) {
   resetGeState();
   patchGeList((u32 *)((u32)list & 0x0fffffff), (u32 *)((u32)stall & 0x0fffffff));
-  sceKernelDcacheWritebackInvalidateAll();
   return _sceGeListEnQueueHead(list, stall, cbid, arg);
 }
 
@@ -762,12 +797,13 @@ int sceGeListSyncPatched(int qid, int syncType) {
 void copyFrameBuffer() {
   *(u32 *)DRAW_NATIVE = 1;
 
+  // memcpy((void *)DISPLAY_BUFFER, (void *)VRAM_DRAW_BUFFER_OFFSET, 960*544*2);
   sceGuStart(0, (void *)(RENDER_LIST | 0xA0000000));
   sceGuCopyImage(PIXELFORMAT, 0, 0, WIDTH, HEIGHT, PITCH,
                  (void *)VRAM_DRAW_BUFFER_OFFSET,
                  0, 0, PITCH, (void *)DISPLAY_BUFFER);
   sceGuFinish();
-  _sceGeListEnQueue((void *)RENDER_LIST, NULL, 0, NULL);
+  _sceGeListEnQueue((void *)RENDER_LIST, NULL, -1, NULL);
 }
 
 int sceGeDrawSyncPatched(int syncType) {
