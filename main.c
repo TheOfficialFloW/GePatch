@@ -188,19 +188,20 @@ void GetIndexBounds(const void *inds, int count, u32 vertType, u16 *indexLowerBo
 }
 
 typedef struct {
-  u32 list;
+  u32 *list;
   u32 base;
   u32 offset;
 } StackEntry;
 
 typedef struct {
-  u32 ge_cmds[0x100];
+  u32 ge_cmd[0x100];
 
   u32 texbufptr[8];
   u32 texbufwidth[8];
   u32 framebufptr;
   u32 framebufwidth;
   u32 *framebufwidth_addr;
+  u32 framebuf;
 
   u32 base;
   u32 offset;
@@ -300,35 +301,35 @@ void patchGeList(u32 *list, u32 *stall) {
     u32 cmd = op >> 24;
     u32 data = op & 0xffffff;
 
-    state.ge_cmds[cmd] = op;
+    state.ge_cmd[cmd] = data;
 
     switch (cmd) {
       // Skip matrix data
 
-      case GE_CMD_BONEMATRIXNUMBER:
-        if (*(list+12) >> 24 == GE_CMD_BONEMATRIXDATA)
-          list += 12;
-        break;
+      // case GE_CMD_BONEMATRIXNUMBER:
+        // if (*(list+12) >> 24 == GE_CMD_BONEMATRIXDATA)
+          // list += 12;
+        // break;
 
-      case GE_CMD_WORLDMATRIXNUMBER:
-        if (*(list+12) >> 24 == GE_CMD_WORLDMATRIXDATA)
-          list += 12;
-        break;
+      // case GE_CMD_WORLDMATRIXNUMBER:
+        // if (*(list+12) >> 24 == GE_CMD_WORLDMATRIXDATA)
+          // list += 12;
+        // break;
 
-      case GE_CMD_VIEWMATRIXNUMBER:
-        if (*(list+12) >> 24 == GE_CMD_VIEWMATRIXDATA)
-          list += 12;
-        break;
+      // case GE_CMD_VIEWMATRIXNUMBER:
+        // if (*(list+12) >> 24 == GE_CMD_VIEWMATRIXDATA)
+          // list += 12;
+        // break;
 
-      case GE_CMD_TGENMATRIXNUMBER:
-        if (*(list+12) >> 24 == GE_CMD_TGENMATRIXDATA)
-          list += 12;
-        break;
+      // case GE_CMD_TGENMATRIXNUMBER:
+        // if (*(list+12) >> 24 == GE_CMD_TGENMATRIXDATA)
+          // list += 12;
+        // break;
 
-      case GE_CMD_PROJMATRIXNUMBER:
-        if (*(list+16) >> 24 == GE_CMD_PROJMATRIXDATA)
-          list += 16;
-        break;
+      // case GE_CMD_PROJMATRIXNUMBER:
+        // if (*(list+16) >> 24 == GE_CMD_PROJMATRIXDATA)
+          // list += 16;
+        // break;
 
       // Handle control flow commands
 
@@ -348,7 +349,7 @@ void patchGeList(u32 *list, u32 *stall) {
       case GE_CMD_CALL:
         state.address = ((state.base | data) + state.offset) & 0x0ffffffc;
         stack_entry = &stack_entry_buf;
-        stack_entry->list = (u32)list;
+        stack_entry->list = list;
         stack_entry->offset = state.offset;
         if (push(stack_entry) == 0) {
           list = (u32 *)(state.address - 4);
@@ -367,15 +368,13 @@ void patchGeList(u32 *list, u32 *stall) {
         break;
 
       case GE_CMD_RET:
-      {
         // Ignore returns when the stack is empty
         stack_entry = pop();
         if (stack_entry) {
-          list = (u32 *)stack_entry->list;
+          list = stack_entry->list;
           state.offset = stack_entry->offset;
         }
         break;
-      }
 
       case GE_CMD_END:
       {
@@ -403,7 +402,7 @@ void patchGeList(u32 *list, u32 *stall) {
               case PSP_GE_SIGNAL_CALL:
                 target = (((signal << 16) | enddata) & 0x0ffffffc);
                 stack_entry = &stack_entry_buf;
-                stack_entry->list = (u32)list;
+                stack_entry->list = list;
                 stack_entry->base = state.base;
                 stack_entry->offset = state.offset;
                 if (push(stack_entry) == 0)
@@ -414,7 +413,7 @@ void patchGeList(u32 *list, u32 *stall) {
                 // Ignore returns when the stack is empty
                 stack_entry = pop();
                 if (stack_entry) {
-                  list = (u32 *)stack_entry->list;
+                  list = stack_entry->list;
                   state.base = stack_entry->base;
                   state.offset = stack_entry->offset;
                 }
@@ -459,7 +458,7 @@ void patchGeList(u32 *list, u32 *stall) {
       case GE_CMD_BEZIER:
       case GE_CMD_SPLINE:
       {
-        if (state.ignore_framebuf || state.ignore_texture) {
+        if (state.ignore_framebuf || (state.ignore_texture && state.ge_cmd[GE_CMD_TEXTUREMAPENABLE])) {
           *list = 0;
           break;
         }
@@ -481,7 +480,7 @@ void patchGeList(u32 *list, u32 *stall) {
 
       case GE_CMD_BOUNDINGBOX:
       {
-        if (state.ignore_framebuf || state.ignore_texture)
+        if (state.ignore_framebuf || (state.ignore_texture && state.ge_cmd[GE_CMD_TEXTUREMAPENABLE]))
           break;
 
         if ((state.vertex_type & GE_VTYPE_THROUGH_MASK) == GE_VTYPE_THROUGH) {
@@ -500,7 +499,7 @@ void patchGeList(u32 *list, u32 *stall) {
       {
         // Dragon Ball Z Tenkaichi Tag Team uses the same GE list again,
         // therefore NOPing it makes character invisible.
-        if (state.ignore_framebuf || state.ignore_texture) {
+        if (state.ignore_framebuf || (state.ignore_texture && state.ge_cmd[GE_CMD_TEXTUREMAPENABLE])) {
           *list = 0;
           break;
         }
@@ -613,6 +612,10 @@ exit_loop:
 
       // Patch GE commands
 
+      case GE_CMD_DITHERENABLE:
+        *list = (cmd << 24) | 1;
+        break;
+
       case GE_CMD_FRAMEBUFPIXFORMAT:
         *list = (cmd << 24) | PIXELFORMAT;
         break;
@@ -624,24 +627,25 @@ exit_loop:
           *list = (cmd << 24) | (VRAM_DRAW_BUFFER_OFFSET & 0xffffff);
           state.framebufptr = op;
         } else {
-          *list = (cmd << 24) | ((VRAM_DRAW_BUFFER_OFFSET >> 24) << 16) | PITCH;
+          u16 pitch = (op & 0xffff) != 512 ? (op & 0xffff) : 960;
+          *list = (cmd << 24) | ((VRAM_DRAW_BUFFER_OFFSET >> 24) << 16) | pitch;
           state.framebufwidth = op;
           state.framebufwidth_addr = list;
         }
 
         if (state.framebufptr && state.framebufwidth) {
-          u32 framebuf = FAKE_VRAM | (state.framebufptr & 0xffffff);
-          u32 pitch = state.framebufwidth & 0xffff;
+          state.framebuf = FAKE_VRAM | (state.framebufptr & 0xffffff);
 
           // This allows more games to work, but causes weird triangles in Sonic.
-          if (pitch == 512 || pitch == 480 || pitch == 960) {
+          u32 pitch = state.framebufwidth & 0xffff;
+          if (pitch == 512 || pitch == 960) {
             state.ignore_framebuf = 0;
           } else {
-            // *state.framebufwidth_addr = (GE_CMD_FRAMEBUFWIDTH << 24) | ((VRAM_1KB >> 24) << 16) | 0;
+            *state.framebufwidth_addr = (GE_CMD_FRAMEBUFWIDTH << 24) | ((VRAM_1KB >> 24) << 16) | 0;
             state.ignore_framebuf = 1;
           }
 
-          insertFramebuf(framebuf);
+          insertFramebuf(state.framebuf);
 
           state.framebufptr = 0;
           state.framebufwidth = 0;
@@ -686,7 +690,7 @@ exit_loop:
 
         if (state.texbufptr[index] && state.texbufwidth[index]) {
           u32 texaddr = ((state.texbufwidth[index] & 0x0f0000) << 8) | (state.texbufptr[index] & 0xffffff);
-          if (findFramebuf(texaddr) >= 0) {
+          if (texaddr != state.framebuf && findFramebuf(texaddr) >= 0) {
             state.ignore_texture = 1;
           } else {
             state.ignore_texture = 0;
