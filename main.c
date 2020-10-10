@@ -1,5 +1,6 @@
 #include <pspsdk.h>
 #include <pspkernel.h>
+#include <pspctrl.h>
 #include <pspge.h>
 #include <pspgu.h>
 
@@ -808,6 +809,11 @@ int sceDisplaySetFrameBufPatched(void *topaddr, int bufferwidth, int pixelformat
 }
 
 int module_start(SceSize args, void *argp) {
+  SceCtrlData pad;
+  sceCtrlPeekBufferPositive(&pad, 1);
+  if (pad.Buttons & PSP_CTRL_LTRIGGER)
+    return 0;
+
   _sceGeEdramGetAddr = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0xE47E40E4);
   _sceGeEdramGetSize = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0x1F6752AD);
   _sceGeGetList = (void *)FindProc("sceGE_Manager", "sceGe_driver", 0x67B01D8E);

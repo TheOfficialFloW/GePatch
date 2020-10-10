@@ -8,6 +8,7 @@ Please help testing games and filling out the [spreadsheet](https://docs.google.
 
 ## Changelog v0.2
 
+- Added ability to skip GE patches by holding L while starting a game.
 - Changed framebuffer copy algorithm.
 - Changed behavior of sync opcode.
 - Disabled forced dithering again.
