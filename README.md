@@ -94,6 +94,20 @@ Please help testing games and filling out the [spreadsheet](https://docs.google.
 
 ## Known Issues
 
+### Experimental MPEG framebuffer fallback
+
+Successful MPEG AVC/VME colour-conversion calls temporarily select Adrenaline's
+normal PSP framebuffer and bypass native GE-list rewriting for video. Native
+presentation resumes after one second of conversion inactivity and fresh game
+geometry. Videos retain their original resolution. Diagnostics use the
+`mpeg-fallback` prefix in `ms0:/ge_patch.txt`.
+
+This is a heuristic, not an all-game fix: other codecs, concurrent calls,
+stalled/reused GE lists and same-address MPEG module reloads need additional
+testing. The original L-trigger bypass remains available. `make test` runs
+small Linux host simulations (native C compiler plus PSPDEV on PATH), not a
+physical GPU/decoder compatibility test.
+
 Some games may:
 
 - Not display cutscenes.

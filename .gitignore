@@ -1,0 +1,6 @@
+*.o
+*.elf
+*.prx
+release-assets/
+core
+core.*
